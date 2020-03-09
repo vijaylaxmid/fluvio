@@ -53,6 +53,13 @@ To test development module:
 node test.js
 ```
 
+# Build and Link
+
+Compile and publish for local node project (npm link):
+
+```
+make build-local
+```
 
 ## License
 

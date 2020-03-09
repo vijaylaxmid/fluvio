@@ -5,6 +5,9 @@ all:	build
 build:	
 	nj-cli build
 
+build-local:	
+	npm link
+
 test:	build
 	node test.js
 

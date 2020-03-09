@@ -20,5 +20,5 @@ flv-future-aio = { version = "0.1.0" }
 kf-protocol = { version = "0.1.0"}
 types = { version = "0.1.0", package = "flv-types"}
 flv-client = { version = "0.1.0" }
-node-bindgen = { version = "0.1.0" }
+node-bindgen = { version = "0.1.2" }
 

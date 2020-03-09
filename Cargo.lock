@@ -1960,9 +1960,9 @@ dependencies = [
 
 [[package]]
 name = "node-bindgen"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "690613eca6eef5c31a3419e6a581a65b0f101283a4efc2bfa67639bf5216db89"
+checksum = "8edca520a2258a4ab1789b1c5ad5c7368e098eb55587454d327959f2a4c7c84d"
 dependencies = [
  "nj-core",
  "nj-derive",

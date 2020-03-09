@@ -5,20 +5,25 @@ use std::sync::Arc;
 use log::debug;
 
 use futures::stream::StreamExt;
+
 use flv_client::SpuLeader;
 use flv_client::ReplicaLeader;
 use flv_future_aio::sync::RwLock;
+use flv_future_core::run_block_on;
 use flv_client::ClientError;
 
 use kf_protocol::api::MAX_BYTES;
 use kf_protocol::api::Isolation;
 use kf_protocol::api::PartitionOffset;
+
 use node_bindgen::derive::node_bindgen;
 use node_bindgen::core::NjError;
 use node_bindgen::core::val::JsEnv;
 use node_bindgen::core::TryIntoJs;
 use node_bindgen::sys::napi_value;
 use node_bindgen::core::JSClass;
+
+use types::socket_helpers::ServerAddress;
 
 type SharedSpuLeader = Arc<RwLock<SpuLeader>>;
 pub struct SpuLeaderWrapper(SpuLeader);
@@ -50,6 +55,27 @@ impl JsSpuLeader {
 
     pub fn set_leader(&mut self, leader: SpuLeader) {
         self.inner.replace(Arc::new(RwLock::new(leader)));
+    }
+
+    fn rust_addr(&self) -> Option<ServerAddress> {
+        // since SpuLeader is in the lock, we need to read in order to access it
+        self.inner.as_ref().map_or(None, move |c| {
+            run_block_on(async move {
+                let c1 = c.clone();
+                let read_client = c1.read().await;
+                Some(read_client.addr().clone())
+            })
+        })
+    }
+
+    /// JS method to return host:port address
+    #[node_bindgen]
+    fn full_address(&self) -> String {
+        if let Some(result) = self.rust_addr() {
+            result.to_string()
+        } else {
+            "".to_owned()
+        }
     }
 
     /// send string to replica
