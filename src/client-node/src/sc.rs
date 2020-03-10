@@ -18,7 +18,7 @@ use node_bindgen::core::val::JsEnv;
 use node_bindgen::sys::napi_value;
 use node_bindgen::core::JSClass;
 
-use crate::SpuLeaderWrapper;
+use crate::ReplicaLeaderWrapper;
 
 type DefaultScClient = ScClient<String>;
 type SharedScClient = Arc<RwLock<DefaultScClient>>;
@@ -75,7 +75,11 @@ impl JsScClient {
     }
 
     #[node_bindgen]
-    async fn leader(&self, topic: String, partition: i32) -> Result<SpuLeaderWrapper, ClientError> {
+    async fn leader(
+        &self,
+        topic: String,
+        partition: i32,
+    ) -> Result<ReplicaLeaderWrapper, ClientError> {
         let client = self.inner.as_ref().unwrap().clone();
         let mut client_w = client.write().await;
         client_w

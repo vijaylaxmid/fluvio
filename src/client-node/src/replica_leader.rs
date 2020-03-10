@@ -1,8 +1,8 @@
-// JS Wrapper for SpuLeader
+// JS Wrapper for ReplicaLeader
 
 use std::sync::Arc;
 
-use log::debug;
+use log::{debug, trace};
 
 use futures::stream::StreamExt;
 
@@ -26,28 +26,28 @@ use node_bindgen::core::JSClass;
 use types::socket_helpers::ServerAddress;
 
 type SharedSpuLeader = Arc<RwLock<SpuLeader>>;
-pub struct SpuLeaderWrapper(SpuLeader);
+pub struct ReplicaLeaderWrapper(SpuLeader);
 
-impl From<SpuLeader> for SpuLeaderWrapper {
+impl From<SpuLeader> for ReplicaLeaderWrapper {
     fn from(leader: SpuLeader) -> Self {
         Self(leader)
     }
 }
 
-impl TryIntoJs for SpuLeaderWrapper {
+impl TryIntoJs for ReplicaLeaderWrapper {
     fn try_to_js(self, js_env: &JsEnv) -> Result<napi_value, NjError> {
-        let new_instance = JsSpuLeader::new_instance(js_env, vec![])?;
-        JsSpuLeader::unwrap(js_env, new_instance)?.set_leader(self.0);
+        let new_instance = JsReplicaLeader::new_instance(js_env, vec![])?;
+        JsReplicaLeader::unwrap(js_env, new_instance)?.set_leader(self.0);
         Ok(new_instance)
     }
 }
 
-pub struct JsSpuLeader {
+pub struct JsReplicaLeader {
     inner: Option<SharedSpuLeader>,
 }
 
 #[node_bindgen]
-impl JsSpuLeader {
+impl JsReplicaLeader {
     #[node_bindgen(constructor)]
     pub fn new() -> Self {
         Self { inner: None }
@@ -57,8 +57,8 @@ impl JsSpuLeader {
         self.inner.replace(Arc::new(RwLock::new(leader)));
     }
 
-    fn rust_addr(&self) -> Option<ServerAddress> {
-        // since SpuLeader is in the lock, we need to read in order to access it
+    fn get_addr(&self) -> Option<ServerAddress> {
+        // since SpuLeader is locked, we need to read in order to access it
         self.inner.as_ref().map_or(None, move |c| {
             run_block_on(async move {
                 let c1 = c.clone();
@@ -68,18 +68,17 @@ impl JsSpuLeader {
         })
     }
 
-    /// JS method to return host:port address
+    /// JS method to return Replica Leader host:port address in string format
     #[node_bindgen]
     fn full_address(&self) -> String {
-        if let Some(result) = self.rust_addr() {
+        if let Some(result) = self.get_addr() {
             result.to_string()
         } else {
             "".to_owned()
         }
     }
 
-    /// send string to replica
-    /// produce (message)
+    /// JS method to send message to the replica leader
     #[node_bindgen]
     async fn produce(&self, message: String) -> Result<i64, ClientError> {
         let leader = self.inner.as_ref().unwrap().clone();
@@ -90,21 +89,32 @@ impl JsSpuLeader {
         producer.send_record(bytes).await.map(|_| len as i64)
     }
 
-    /// consume message from topic
-    /// consume(topic,partition,emitter_cb)
+    /// JS method to consume message from replica leader
+    /// * consume(replica_leader, emitter_cb)
     #[node_bindgen]
     async fn consume<F: Fn(String, String)>(&self, cb: F) {
-        let leader = self.inner.as_ref().unwrap().clone(); // there should be always leader
+        // there should be always leader
+        let leader = self.inner.as_ref().unwrap().clone();
 
         let mut leader_w = leader.write().await;
 
         let offsets = leader_w
             .fetch_offsets()
             .await
-            .expect("offset should not fail");
+            .expect("fetch offsets should not fail");
         let beginning_offset = offsets.start_offset();
 
-        debug!("starting consume with fetch offset: {}", beginning_offset);
+        /*
+        TODO: bring back when JSON support is available.
+
+        let beginning_offset = if from_beginning {
+            offsets.start_offset()
+        } else {
+            offsets.last_stable_offset()
+        };
+        */
+
+        debug!("start consumer fetch from offset: {}", beginning_offset);
 
         let mut log_stream =
             leader_w.fetch_logs(beginning_offset, MAX_BYTES, Isolation::ReadCommitted);
@@ -114,13 +124,14 @@ impl JsSpuLeader {
         while let Some(partition_response) = log_stream.next().await {
             let records = partition_response.records;
 
-            debug!("received records: {:#?}", records);
+            trace!("received records: {:#?}", records);
 
             for batch in records.batches {
                 for record in batch.records {
                     if let Some(bytes) = record.value().inner_value() {
                         let msg = String::from_utf8(bytes).expect("string");
-                        debug!("msg: {}", msg);
+                        trace!("msg: {}", msg);
+
                         cb(event.clone(), msg);
                     }
                 }

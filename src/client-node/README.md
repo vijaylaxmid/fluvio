@@ -61,6 +61,14 @@ Compile and publish for local node project (npm link):
 make build-local
 ```
 
+# Expand macro result
+
+To see resulting macro run
+
+```
+cargo expand
+```
+
 ## License
 
 This project is licensed under the [Apache license](LICENSE-APACHE).
