@@ -1,30 +1,36 @@
 use std::process::Command;
 use std::io::Error as IoError;
+use std::io::ErrorKind;
+
 use semver::Version;
 use k8_client::K8Config;
-use std::io::ErrorKind;
+use k8_config::KubeContext;
 use std::net::{IpAddr};
 use std::str::FromStr;
 use url::{Url};
 
 use super::*;
 
-fn get_cluster_server_host() -> Result<String, IoError> {
+fn get_current_context() -> Result<KubeContext, IoError> {
     let k8_config = K8Config::load().map_err(|err| {
         IoError::new(
             ErrorKind::Other,
             format!("unable to load kube context {}", err),
         )
     })?;
-    let kc_config = match k8_config {
+    return match k8_config {
         K8Config::Pod(_) => {
             return Err(IoError::new(
                 ErrorKind::Other,
                 "Pod config is not valid here",
             ))
         }
-        K8Config::KubeConfig(config) => config,
+        K8Config::KubeConfig(config) => Ok(config),
     };
+}
+
+fn get_cluster_server_host() -> Result<String, IoError> {
+    let kc_config = get_current_context()?;
 
     if let Some(ctx) = kc_config.config.current_cluster() {
         let server_url = ctx.cluster.server.to_owned();
@@ -38,6 +44,16 @@ fn get_cluster_server_host() -> Result<String, IoError> {
             }
         };
         Ok(url.host().unwrap().to_string())
+    } else {
+        Err(IoError::new(ErrorKind::Other, "no context found"))
+    }
+}
+
+fn compute_user_name() -> Result<String, IoError> {
+    let kc_config = get_current_context()?;
+
+    if let Some(ctx) = kc_config.config.current_context() {
+        Ok(ctx.context.user.to_owned())
     } else {
         Err(IoError::new(ErrorKind::Other, "no context found"))
     }
@@ -117,6 +133,19 @@ fn pre_install_check() -> Result<(), CliError> {
         ));
     }
 
+    let username = match compute_user_name() {
+        Ok(username) => username,
+        Err(e) => {
+            return Err(CliError::Other(format!(
+                "error fetching username from context {}",
+                e.to_string()
+            )))
+        }
+    };
+    if username == "minikube" {
+        // try getting tunnel up
+    }
+    
     Ok(())
 }
 
