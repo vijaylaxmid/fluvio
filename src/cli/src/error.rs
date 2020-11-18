@@ -1,9 +1,7 @@
 use std::io::Error as IoError;
 
-mod user_error;
-
 use fluvio::FluvioError;
-use fluvio_cluster::{ClusterError, CheckError};
+use fluvio_cluster::{ClusterError, CheckError, K8InstallError, HelmError};
 
 pub type Result<T> = std::result::Result<T, CliError>;
 
@@ -48,5 +46,23 @@ impl From<http_types::Error> for CliError {
 impl CliError {
     pub fn invalid_arg<M: Into<String>>(reason: M) -> Self {
         Self::InvalidArg(reason.into())
+    }
+
+    pub fn into_report(self) -> color_eyre::Report {
+        use color_eyre::{Report, Section};
+
+        match self {
+            e @ CliError::ClusterError(ClusterError::InstallK8(K8InstallError::PreCheck(CheckError::HelmError(HelmError::FailedToConnect)))) => {
+                let report = Report::from(e);
+
+                #[cfg(target_os = "macos")]
+                let report = report.suggestion("Make sure you have run 'minikube start --driver=hyperkit'");
+                #[cfg(not(target_os = "macos"))]
+                let report = report.suggestion("Make sure you have run 'minikube start --driver=docker'");
+                let report = report.suggestion("Make sure you have run 'minikube tunnel'");
+                report
+            }
+            e => Report::from(e),
+        }
     }
 }
