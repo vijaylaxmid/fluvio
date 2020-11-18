@@ -18,17 +18,24 @@ pub enum HelmError {
         #[from]
         source: IoError,
     },
-    #[error("failed to read helm client version: {0}")]
+    #[error("Failed to read helm client version: {0}")]
     HelmVersionNotFound(String),
-    #[error("failed to parse helm output as UTF8")]
+    #[error("Failed to connect to Kubernetes")]
+    FailedToConnect,
+    #[error("Failed to parse helm output as UTF8")]
     Utf8Error {
         #[from]
         source: FromUtf8Error,
     },
-    #[error("failed to parse JSON from helm output")]
+    #[error(
+"Failed to parse JSON from helm output.
+Command: '{command}'
+Output: '{output}'"
+    )]
     Serde {
-        #[from]
         source: serde_json::Error,
+        command: String,
+        output: String,
     },
 }
 
@@ -132,27 +139,55 @@ impl HelmClient {
     /// Searches the repo for the named helm chart
     #[instrument(skip(self))]
     pub(crate) fn search_repo(&self, chart: &str, version: &str) -> Result<Vec<Chart>, HelmError> {
-        let output = Command::new("helm")
+        let mut command = Command::new("helm");
+        command
             .args(&["search", "repo", chart])
             .args(&["--version", version])
-            .args(&["--output", "json"])
-            .print()
-            .output()?;
+            .args(&["--output", "json"]);
+        let output = command.print().output()?;
+        if !output.stderr.is_empty() {
+            let stderr = String::from_utf8(output.stderr)?;
+            if stderr.contains("Kubernetes cluster unreachable") {
+                return Err(HelmError::FailedToConnect);
+            }
+        }
 
-        serde_json::from_slice(&output.stdout).map_err(|source| HelmError::Serde { source })
+        let stdout = String::from_utf8(output.stdout)?;
+        serde_json::from_str(&stdout)
+            .map_err(|source| {
+                HelmError::Serde {
+                    source,
+                    output: stdout.clone(),
+                    command: format!("{:?}", command).replace("\"", ""),
+                }
+            })
     }
 
     /// Get all the available versions
     #[instrument(skip(self))]
     pub(crate) fn versions(&self, chart: &str) -> Result<Vec<Chart>, HelmError> {
-        let output = Command::new("helm")
+        let mut command = Command::new("helm");
+        command
             .args(&["search", "repo"])
             .args(&["--versions", chart])
-            .args(&["--output", "json", "--devel"])
-            .print()
-            .output()?;
+            .args(&["--output", "json", "--devel"]);
+        let output = command.print().output()?;
+        if !output.stderr.is_empty() {
+            let stderr = String::from_utf8(output.stderr)?;
+            if stderr.contains("Kubernetes cluster unreachable") {
+                return Err(HelmError::FailedToConnect);
+            }
+        }
 
-        serde_json::from_slice(&output.stdout).map_err(|source| HelmError::Serde { source })
+        let stdout = String::from_utf8(output.stdout)?;
+        serde_json::from_str(&stdout)
+            .map_err(|source| {
+                HelmError::Serde {
+                    source,
+                    output: stdout.clone(),
+                    command: format!("{:?}", command).replace("\"", ""),
+                }
+            })
     }
 
     /// Checks that a given version of a given chart exists in the repo.
@@ -177,16 +212,32 @@ impl HelmClient {
         name: &str,
     ) -> Result<Vec<InstalledChart>, HelmError> {
         let exact_match = format!("^{}$", name);
-        let output = Command::new("helm")
+        let mut command = Command::new("helm");
+        command
             .arg("list")
             .arg("--filter")
             .arg(exact_match)
             .arg("--output")
-            .arg("json")
+            .arg("json");
+        let output = command
             .print()
             .output()?;
+        if !output.stderr.is_empty() {
+            let stderr = String::from_utf8(output.stderr)?;
+            if stderr.contains("Kubernetes cluster unreachable") {
+                return Err(HelmError::FailedToConnect);
+            }
+        }
 
-        serde_json::from_slice(&output.stdout).map_err(|source| HelmError::Serde { source })
+        let stdout = String::from_utf8(output.stdout)?;
+        serde_json::from_str(&stdout)
+            .map_err(|source| {
+                HelmError::Serde {
+                    source,
+                    output: stdout.clone(),
+                    command: format!("{:?}", command).replace("\"", ""),
+                }
+            })
     }
 
     /// get helm package version
