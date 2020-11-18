@@ -27,7 +27,7 @@ mod local;
 
 pub use install::ClusterInstaller;
 pub use install::ClusterInstallerBuilder;
-pub use error::ClusterError;
+pub use error::{ClusterError, K8InstallError, LocalInstallError, UninstallError};
 pub use check::ClusterChecker;
 pub use check::CheckError;
 pub use uninstall::ClusterUninstaller;

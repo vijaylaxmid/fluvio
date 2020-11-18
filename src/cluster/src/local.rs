@@ -18,7 +18,7 @@ use k8_obj_metadata::InputK8Obj;
 use k8_obj_metadata::InputObjectMeta;
 use k8_client::SharedK8Client;
 
-use crate::ClusterError;
+use crate::{LocalInstallError, ClusterError};
 use crate::check::{CheckError, StatusCheck, InstallCheck, HelmVersion, SysChart};
 use crate::install::{ClusterInstaller, DEFAULT_NAMESPACE};
 
@@ -61,6 +61,7 @@ impl LocalClusterInstallerBuilder {
     pub fn build(self) -> Result<LocalClusterInstaller, ClusterError> {
         Ok(LocalClusterInstaller { config: self })
     }
+
     /// Sets the number of SPU replicas that should be provisioned. Defaults to 1.
     ///
     /// # Example
@@ -234,7 +235,9 @@ impl LocalClusterInstaller {
                         // do nothing check is fine
                     }
                     // unrecoverable error occured, return error
-                    StatusCheck::NotWorkingNoRemediation(failure) => return Err(failure.into()),
+                    StatusCheck::NotWorkingNoRemediation(failure) => {
+                        return Err(LocalInstallError::PreCheck(failure).into());
+                    },
                     // recoverable error occured, try to fix
                     StatusCheck::NotWorking(failure, _) => {
                         match self.pre_install_fix(failure).await {
@@ -246,7 +249,7 @@ impl LocalClusterInstaller {
                         };
                     }
                 },
-                Err(err) => return Err(err.into()),
+                Err(err) => return Err(LocalInstallError::PreCheck(err).into()),
             };
         }
 
@@ -270,7 +273,7 @@ impl LocalClusterInstaller {
             }
             unhandled => {
                 warn!("Pre-install was unable to autofix an error");
-                return Err(unhandled.into());
+                return Err(LocalInstallError::PreCheck(unhandled).into());
             }
         }
 
@@ -282,7 +285,8 @@ impl LocalClusterInstaller {
         self.pre_install_check().await?;
         debug!("using log dir: {}", &self.config.log_dir);
         if !Path::new(&self.config.log_dir.to_string()).exists() {
-            create_dir_all(&self.config.log_dir.to_string())?;
+            create_dir_all(&self.config.log_dir.to_string())
+                .map_err(LocalInstallError::IoError)?;
         }
         // ensure we sync files before we launch servers
         Command::new("sync").inherit();
@@ -299,7 +303,8 @@ impl LocalClusterInstaller {
         sleep(Duration::from_secs(1)).await;
         Ok(())
     }
-    fn launch_sc(&self) -> Result<(), ClusterError> {
+
+    fn launch_sc(&self) -> Result<(), LocalInstallError> {
         let outputs = File::create(format!("{}/flv_sc.log", &self.config.log_dir))?;
         let errors = outputs.try_clone()?;
         debug!("starting sc server");
@@ -328,7 +333,7 @@ impl LocalClusterInstaller {
         cmd: &mut Command,
         tls: &TlsConfig,
         port: u16,
-    ) -> Result<(), ClusterError> {
+    ) -> Result<(), LocalInstallError> {
         let paths: Cow<TlsPaths> = match tls {
             TlsConfig::Files(paths) => Cow::Borrowed(paths),
             TlsConfig::Inline(certs) => Cow::Owned(certs.try_into_temp_files()?),
@@ -338,15 +343,15 @@ impl LocalClusterInstaller {
         let ca_cert = paths
             .ca_cert
             .to_str()
-            .ok_or_else(|| ClusterError::Other("ca_cert must be a valid path".to_string()))?;
+            .ok_or_else(|| LocalInstallError::Other("ca_cert must be a valid path".to_string()))?;
         let server_cert = paths
             .cert
             .to_str()
-            .ok_or_else(|| ClusterError::Other("server_cert must be a valid path".to_string()))?;
+            .ok_or_else(|| LocalInstallError::Other("server_cert must be a valid path".to_string()))?;
         let server_key = paths
             .key
             .to_str()
-            .ok_or_else(|| ClusterError::Other("server_key must be a valid path".to_string()))?;
+            .ok_or_else(|| LocalInstallError::Other("server_key must be a valid path".to_string()))?;
         cmd.arg("--tls")
             .arg("--enable-client-cert")
             .arg("--server-cert")
@@ -361,7 +366,7 @@ impl LocalClusterInstaller {
     }
 
     /// set local profile
-    fn set_profile(&self) -> Result<String, ClusterError> {
+    fn set_profile(&self) -> Result<String, LocalInstallError> {
         let local_addr = "localhost:9003".to_owned();
         let mut config_file = ConfigFile::load_default_or_new()?;
 
@@ -398,7 +403,7 @@ impl LocalClusterInstaller {
         Ok(format!("local context is set to: {}", local_addr))
     }
 
-    async fn launch_spu_group(&self) -> Result<(), ClusterError> {
+    async fn launch_spu_group(&self) -> Result<(), LocalInstallError> {
         use k8_client::load_and_share;
         let client = load_and_share()?;
         let count = self.config.spu_spec.replicas;
@@ -417,7 +422,7 @@ impl LocalClusterInstaller {
         spu_index: u16,
         client: SharedK8Client,
         log_dir: &str,
-    ) -> Result<(), ClusterError> {
+    ) -> Result<(), LocalInstallError> {
         use k8_client::metadata::MetadataClient;
         const BASE_PORT: u16 = 9010;
         const BASE_SPU: u16 = 5001;
@@ -483,7 +488,7 @@ impl LocalClusterInstaller {
         cmd.stdout(Stdio::from(outputs))
             .stderr(Stdio::from(errors))
             .spawn()
-            .map_err(|_| ClusterError::Other("SPU server failed to start".to_string()))?;
+            .map_err(|_| LocalInstallError::Other("SPU server failed to start".to_string()))?;
         Ok(())
     }
 }

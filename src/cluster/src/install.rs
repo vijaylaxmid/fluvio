@@ -23,12 +23,13 @@ use k8_client::metadata::MetadataClient;
 use k8_obj_core::service::ServiceSpec;
 use k8_obj_metadata::InputObjectMeta;
 
-use crate::ClusterError;
 use crate::helm::{HelmClient, Chart, InstalledChart};
 use crate::check::{
     CheckError, StatusCheck, InstallCheck, HelmVersion, AlreadyInstalled, SysChart, LoadableConfig,
     LoadBalancer,
 };
+use crate::error::K8InstallError;
+use crate::ClusterError;
 
 pub(crate) const DEFAULT_NAMESPACE: &str = "default";
 pub(crate) const DEFAULT_HELM_VERSION: &str = "3.3.4";
@@ -114,8 +115,8 @@ impl ClusterInstallerBuilder {
     pub fn build(self) -> Result<ClusterInstaller, ClusterError> {
         Ok(ClusterInstaller {
             config: self,
-            kube_client: K8Client::default()?,
-            helm_client: HelmClient::new()?,
+            kube_client: K8Client::default().map_err(K8InstallError::K8ClientError)?,
+            helm_client: HelmClient::new().map_err(K8InstallError::HelmError)?,
         })
     }
 
@@ -595,13 +596,15 @@ impl ClusterInstaller {
 
     /// Get all the available versions of fluvio chart
     pub fn versions() -> Result<Vec<Chart>, ClusterError> {
-        let helm_client = HelmClient::new()?;
-        let versions = helm_client.versions(DEFAULT_CHART_APP_NAME)?;
+        let helm_client = HelmClient::new().map_err(K8InstallError::HelmError)?;
+        let versions = helm_client
+            .versions(DEFAULT_CHART_APP_NAME)
+            .map_err(K8InstallError::HelmError)?;
         Ok(versions)
     }
 
     /// Get installed system chart
-    pub fn sys_charts() -> Result<Vec<InstalledChart>, ClusterError> {
+    pub fn sys_charts() -> Result<Vec<InstalledChart>, K8InstallError> {
         let helm_client = HelmClient::new()?;
         let sys_charts = helm_client.get_installed_chart_by_name(DEFAULT_CHART_SYS_REPO)?;
         Ok(sys_charts)
@@ -619,7 +622,7 @@ impl ClusterInstaller {
     /// [`with_system_chart`]: ./struct.ClusterInstaller.html#method.with_system_chart
     /// [`with_update_context`]: ./struct.ClusterInstaller.html#method.with_update_context
     #[allow(unused)]
-    async fn pre_install_check(&self) -> Result<(), ClusterError> {
+    async fn pre_install_check(&self) -> Result<(), K8InstallError> {
         use colored::*;
 
         let checks: Vec<Box<dyn InstallCheck>> = vec![
@@ -656,7 +659,7 @@ impl ClusterInstaller {
         Ok(())
     }
 
-    async fn _try_minikube_tunnel(&self) -> Result<(), ClusterError> {
+    async fn _try_minikube_tunnel(&self) -> Result<(), K8InstallError> {
         let log_file = File::create("/tmp/tunnel.out")?;
         let error_file = log_file.try_clone()?;
 
@@ -672,7 +675,7 @@ impl ClusterInstaller {
 
     /// Given a pre-check error, attempt to automatically correct it
     #[instrument(skip(self, error))]
-    pub(crate) async fn pre_install_fix(&self, error: CheckError) -> Result<(), ClusterError> {
+    pub(crate) async fn pre_install_fix(&self, error: CheckError) -> Result<(), K8InstallError> {
         // Depending on what error occurred, try to fix the error.
         // If we handle the error successfully, return Ok(()) to indicate success
         // If we cannot handle this error, return it to bubble up
@@ -719,15 +722,13 @@ impl ClusterInstaller {
                     self.install_app()?;
                 }
                 // If Fluvio is already installed, skip install step
-                Err(ClusterError::PreCheckError {
-                    source: CheckError::AlreadyInstalled,
-                }) => {
+                Err(K8InstallError::PreCheck(CheckError::AlreadyInstalled)) => {
                     debug!("Fluvio is already installed. Getting SC address");
                     let sc_address = self.wait_for_sc_service(&self.config.namespace).await?;
                     return Ok(sc_address);
                 }
                 // If there were other unhandled errors, return them
-                Err(unhandled) => return Err(unhandled),
+                Err(unhandled) => return Err(unhandled.into()),
             }
         } else {
             println!("Skipping pre-flight checks, proceeding with the installation");
@@ -735,19 +736,9 @@ impl ClusterInstaller {
         }
 
         let namespace = &self.config.namespace;
-        let sc_address = match self.wait_for_sc_service(namespace).await {
-            Ok(addr) => {
-                info!(addr = &*addr, "Fluvio SC is up");
-                addr
-            }
-            Err(err) => {
-                warn!("Unable to detect Fluvio service. If you're running on Minikube, make sure you have the tunnel up!");
-                return Err(ClusterError::Other(format!(
-                    "Unable to detect Fluvio service: {}",
-                    err
-                )));
-            }
-        };
+        let sc_address = self.wait_for_sc_service(namespace).await
+            .map_err(|_| K8InstallError::UnableToDetectService)?;
+        info!(addr = %sc_address, "Fluvio SC is up:");
 
         if self.config.save_profile {
             self.update_profile(sc_address.clone())?;
@@ -777,7 +768,7 @@ impl ClusterInstaller {
     // TODO: Discussion at https://github.com/infinyon/fluvio/issues/235
     #[doc(hidden)]
     #[instrument(skip(self))]
-    pub fn _install_sys(&self) -> Result<(), ClusterError> {
+    pub fn _install_sys(&self) -> Result<(), K8InstallError> {
         let install_settings = &[("cloud", &*self.config.cloud)];
         match &self.config.chart_location {
             ChartLocation::Remote(chart_location) => {
@@ -819,7 +810,7 @@ impl ClusterInstaller {
 
     /// Install Fluvio Core chart on the configured cluster
     #[instrument(skip(self))]
-    fn install_app(&self) -> Result<(), ClusterError> {
+    fn install_app(&self) -> Result<(), K8InstallError> {
         debug!(
             "Installing fluvio with the following configuration: {:#?}",
             &self.config
@@ -868,10 +859,9 @@ impl ClusterInstaller {
                     .helm_client
                     .chart_version_exists(&self.config.chart_name, &self.config.chart_version)?
                 {
-                    return Err(ClusterError::Other(format!(
-                        "{}:{} not found in helm repo",
-                        &self.config.chart_name, &self.config.chart_version,
-                    )));
+                    return Err(K8InstallError::HelmChartNotFound(format!("{}:{}",
+                                                                         &self.config.chart_name, &self.config.chart_version,
+                    )).into());
                 }
                 debug!(
                     chart_location = &**chart_location,
@@ -919,7 +909,7 @@ impl ClusterInstaller {
 
     /// Looks up the external address of a Fluvio SC instance in the given namespace
     #[instrument(skip(self, ns))]
-    async fn discover_sc_address(&self, ns: &str) -> Result<Option<String>, ClusterError> {
+    async fn discover_sc_address(&self, ns: &str) -> Result<Option<String>, K8InstallError> {
         use k8_client::http::status::StatusCode;
 
         let result = self
@@ -933,7 +923,7 @@ impl ClusterInstaller {
                 info!("no SC service found");
                 return Ok(None);
             }
-            Err(err) => return Err(ClusterError::from(err)),
+            Err(err) => return Err(K8InstallError::from(err)),
         };
 
         let ingress_addr = svc
@@ -958,7 +948,7 @@ impl ClusterInstaller {
 
     /// Wait until the Fluvio SC public service appears in Kubernetes
     #[instrument(skip(self, ns))]
-    async fn wait_for_sc_service(&self, ns: &str) -> Result<String, ClusterError> {
+    async fn wait_for_sc_service(&self, ns: &str) -> Result<String, K8InstallError> {
         info!("waiting for SC service");
         for i in 0..12 {
             if let Some(sock_addr) = self.discover_sc_address(ns).await? {
@@ -975,11 +965,11 @@ impl ClusterInstaller {
             sleep(Duration::from_millis(sleep_ms)).await;
         }
 
-        Err(ClusterError::SCServiceTimeout)
+        Err(K8InstallError::SCServiceTimeout)
     }
 
     /// Wait until the Fluvio SC public service appears in Kubernetes
-    async fn wait_for_sc_port_check(&self, sock_addr_str: &str) -> Result<(), ClusterError> {
+    async fn wait_for_sc_port_check(&self, sock_addr_str: &str) -> Result<(), K8InstallError> {
         info!(sock_addr = %sock_addr_str, "waiting for SC port check");
         for i in 0..12 {
             let sock_addr = self.wait_for_sc_dns(&sock_addr_str).await?;
@@ -992,14 +982,14 @@ impl ClusterInstaller {
             sleep(Duration::from_millis(sleep_ms)).await;
         }
         error!(sock_addr = %sock_addr_str, "timeout for SC port check");
-        Err(ClusterError::SCPortCheckTimeout)
+        Err(K8InstallError::SCPortCheckTimeout)
     }
 
     /// Wait until the Fluvio SC public service appears in Kubernetes
     async fn wait_for_sc_dns(
         &self,
         sock_addr_string: &str,
-    ) -> Result<Vec<SocketAddr>, ClusterError> {
+    ) -> Result<Vec<SocketAddr>, K8InstallError> {
         info!("waiting for SC dns resolution: {}", sock_addr_string);
         for i in 0..12 {
             match resolve(sock_addr_string).await {
@@ -1019,12 +1009,12 @@ impl ClusterInstaller {
         }
 
         error!("timedout sc dns: {}", sock_addr_string);
-        Err(ClusterError::SCDNSTimeout)
+        Err(K8InstallError::SCDNSTimeout)
     }
 
     /// Wait until all SPUs are ready and have ingress
     #[instrument(skip(self, ns))]
-    async fn wait_for_spu(&self, ns: &str, spu: u16) -> Result<bool, ClusterError> {
+    async fn wait_for_spu(&self, ns: &str, spu: u16) -> Result<bool, K8InstallError> {
         info!("waiting for SPU");
         for i in 0..12 {
             debug!("retrieving spu specs");
@@ -1059,7 +1049,7 @@ impl ClusterInstaller {
             }
         }
 
-        Err(ClusterError::SPUTimeout)
+        Err(K8InstallError::SPUTimeout)
     }
 
     /// Install server-side TLS by uploading secrets to kubernetes
@@ -1105,7 +1095,7 @@ impl ClusterInstaller {
     }
 
     /// Updates the Fluvio configuration with the newly installed cluster info.
-    fn update_profile(&self, external_addr: String) -> Result<(), ClusterError> {
+    fn update_profile(&self, external_addr: String) -> Result<(), K8InstallError> {
         debug!("updating profile for: {}", external_addr);
         let mut config_file = ConfigFile::load_default_or_new()?;
         let config = config_file.mut_config();
@@ -1140,12 +1130,12 @@ impl ClusterInstaller {
     }
 
     /// Determines a profile name from the name of the active Kubernetes context
-    fn compute_profile_name(&self) -> Result<String, ClusterError> {
+    fn compute_profile_name(&self) -> Result<String, K8InstallError> {
         let k8_config = K8Config::load()?;
 
         let kc_config = match k8_config {
             K8Config::Pod(_) => {
-                return Err(ClusterError::Other(
+                return Err(K8InstallError::Other(
                     "Pod config is not valid here".to_owned(),
                 ))
             }
@@ -1155,7 +1145,7 @@ impl ClusterInstaller {
         kc_config
             .config
             .current_context()
-            .ok_or_else(|| ClusterError::Other("No context fount".to_owned()))
+            .ok_or_else(|| K8InstallError::Other("No context fount".to_owned()))
             .map(|ctx| ctx.name.to_owned())
     }
 
@@ -1164,7 +1154,7 @@ impl ClusterInstaller {
         skip(self, cluster),
         fields(cluster_addr = &*cluster.addr)
     )]
-    async fn create_managed_spu_group(&self, cluster: &FluvioConfig) -> Result<(), ClusterError> {
+    async fn create_managed_spu_group(&self, cluster: &FluvioConfig) -> Result<(), K8InstallError> {
         debug!("trying to create managed spu: {:#?}", cluster);
         let name = self.config.group_name.clone();
         let fluvio = Fluvio::connect_with_config(cluster).await?;

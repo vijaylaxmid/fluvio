@@ -175,7 +175,6 @@ async fn confirm_spu(spu: u16) -> Result<(), CliError> {
 
     use fluvio_future::timer::sleep;
     use fluvio::Fluvio;
-    use fluvio_cluster::ClusterError;
     use fluvio_controlplane_metadata::spu::SpuSpec;
 
     let delay: u64 = env::var("FLV_SPU_DELAY")
@@ -211,5 +210,5 @@ async fn confirm_spu(spu: u16) -> Result<(), CliError> {
     //drop(admin);
 
     println!("waited too long,bailing out");
-    Err(ClusterError::Other(format!("not able to provision:{} spu", spu)).into())
+    Err(CliError::Other(format!("not able to provision:{} spu", spu)).into())
 }

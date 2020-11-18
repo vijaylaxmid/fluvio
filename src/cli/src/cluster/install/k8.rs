@@ -3,7 +3,7 @@ use std::io::ErrorKind;
 use std::convert::TryInto;
 use std::process::Command;
 
-use fluvio_cluster::ClusterInstaller;
+use fluvio_cluster::{ClusterInstaller, ClusterError};
 use fluvio::config::TlsPolicy;
 use super::*;
 
@@ -92,7 +92,8 @@ pub fn install_sys(opt: InstallOpt) -> Result<(), CliError> {
         _ => (),
     }
     let installer = builder.build()?;
-    installer._install_sys()?;
+    installer._install_sys()
+        .map_err(ClusterError::InstallK8)?;
     println!("fluvio sys chart has been installed");
     Ok(())
 }
