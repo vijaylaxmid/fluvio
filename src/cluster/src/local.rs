@@ -237,7 +237,7 @@ impl LocalClusterInstaller {
                     // unrecoverable error occured, return error
                     StatusCheck::NotWorkingNoRemediation(failure) => {
                         return Err(LocalInstallError::PreCheck(failure).into());
-                    },
+                    }
                     // recoverable error occured, try to fix
                     StatusCheck::NotWorking(failure, _) => {
                         match self.pre_install_fix(failure).await {
@@ -285,8 +285,7 @@ impl LocalClusterInstaller {
         self.pre_install_check().await?;
         debug!("using log dir: {}", &self.config.log_dir);
         if !Path::new(&self.config.log_dir.to_string()).exists() {
-            create_dir_all(&self.config.log_dir.to_string())
-                .map_err(LocalInstallError::IoError)?;
+            create_dir_all(&self.config.log_dir.to_string()).map_err(LocalInstallError::IoError)?;
         }
         // ensure we sync files before we launch servers
         Command::new("sync").inherit();
@@ -344,14 +343,12 @@ impl LocalClusterInstaller {
             .ca_cert
             .to_str()
             .ok_or_else(|| LocalInstallError::Other("ca_cert must be a valid path".to_string()))?;
-        let server_cert = paths
-            .cert
-            .to_str()
-            .ok_or_else(|| LocalInstallError::Other("server_cert must be a valid path".to_string()))?;
-        let server_key = paths
-            .key
-            .to_str()
-            .ok_or_else(|| LocalInstallError::Other("server_key must be a valid path".to_string()))?;
+        let server_cert = paths.cert.to_str().ok_or_else(|| {
+            LocalInstallError::Other("server_cert must be a valid path".to_string())
+        })?;
+        let server_key = paths.key.to_str().ok_or_else(|| {
+            LocalInstallError::Other("server_key must be a valid path".to_string())
+        })?;
         cmd.arg("--tls")
             .arg("--enable-client-cert")
             .arg("--server-cert")

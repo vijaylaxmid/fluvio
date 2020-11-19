@@ -133,8 +133,7 @@ impl ClusterUninstaller {
             .uninstall(&self.config.name, true)
             .map_err(UninstallError::HelmError)?;
 
-        let client = load_and_share()
-            .map_err(UninstallError::K8ClientError)?;
+        let client = load_and_share().map_err(UninstallError::K8ClientError)?;
 
         let sc_pod = InputObjectMeta::named("flv-sc", &self.config.namespace);
         self.wait_for_delete::<PodSpec>(client, &sc_pod).await?;

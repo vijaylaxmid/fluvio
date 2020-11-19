@@ -736,7 +736,9 @@ impl ClusterInstaller {
         }
 
         let namespace = &self.config.namespace;
-        let sc_address = self.wait_for_sc_service(namespace).await
+        let sc_address = self
+            .wait_for_sc_service(namespace)
+            .await
             .map_err(|_| K8InstallError::UnableToDetectService)?;
         info!(addr = %sc_address, "Fluvio SC is up:");
 
@@ -859,9 +861,10 @@ impl ClusterInstaller {
                     .helm_client
                     .chart_version_exists(&self.config.chart_name, &self.config.chart_version)?
                 {
-                    return Err(K8InstallError::HelmChartNotFound(format!("{}:{}",
-                                                                         &self.config.chart_name, &self.config.chart_version,
-                    )).into());
+                    return Err(K8InstallError::HelmChartNotFound(format!(
+                        "{}:{}",
+                        &self.config.chart_name, &self.config.chart_version
+                    )));
                 }
                 debug!(
                     chart_location = &**chart_location,

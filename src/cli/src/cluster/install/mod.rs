@@ -210,5 +210,8 @@ async fn confirm_spu(spu: u16) -> Result<(), CliError> {
     //drop(admin);
 
     println!("waited too long,bailing out");
-    Err(CliError::Other(format!("not able to provision:{} spu", spu)).into())
+    Err(CliError::Other(format!(
+        "not able to provision:{} spu",
+        spu
+    )))
 }

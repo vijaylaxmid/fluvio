@@ -497,8 +497,7 @@ fn check_cluster_server_host() -> Result<StatusCheck, CheckError> {
         .current_cluster()
         .ok_or(CheckError::NoActiveKubernetesContext)?;
     let server_url = cluster_context.cluster.server.to_owned();
-    let url =
-        Url::parse(&server_url).map_err(CheckError::BadKubernetesServerUrl)?;
+    let url = Url::parse(&server_url).map_err(CheckError::BadKubernetesServerUrl)?;
     let host = url
         .host()
         .ok_or(CheckError::MissingKubernetesServerHost)?

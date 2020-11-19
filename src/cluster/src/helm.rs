@@ -36,7 +36,7 @@ pub enum HelmError {
     },
     /// Helm output was not JSON
     #[error(
-"Failed to parse JSON from helm output.
+        "Failed to parse JSON from helm output.
 Command: '{command}'
 Output: '{output}'"
     )]
@@ -164,14 +164,11 @@ impl HelmClient {
         }
 
         let stdout = String::from_utf8(output.stdout)?;
-        serde_json::from_str(&stdout)
-            .map_err(|source| {
-                HelmError::Serde {
-                    source,
-                    output: stdout.clone(),
-                    command: format!("{:?}", command).replace("\"", ""),
-                }
-            })
+        serde_json::from_str(&stdout).map_err(|source| HelmError::Serde {
+            source,
+            output: stdout.clone(),
+            command: format!("{:?}", command).replace("\"", ""),
+        })
     }
 
     /// Get all the available versions
@@ -191,14 +188,11 @@ impl HelmClient {
         }
 
         let stdout = String::from_utf8(output.stdout)?;
-        serde_json::from_str(&stdout)
-            .map_err(|source| {
-                HelmError::Serde {
-                    source,
-                    output: stdout.clone(),
-                    command: format!("{:?}", command).replace("\"", ""),
-                }
-            })
+        serde_json::from_str(&stdout).map_err(|source| HelmError::Serde {
+            source,
+            output: stdout.clone(),
+            command: format!("{:?}", command).replace("\"", ""),
+        })
     }
 
     /// Checks that a given version of a given chart exists in the repo.
@@ -230,9 +224,7 @@ impl HelmClient {
             .arg(exact_match)
             .arg("--output")
             .arg("json");
-        let output = command
-            .print()
-            .output()?;
+        let output = command.print().output()?;
         if !output.stderr.is_empty() {
             let stderr = String::from_utf8(output.stderr)?;
             if stderr.contains("Kubernetes cluster unreachable") {
@@ -241,14 +233,11 @@ impl HelmClient {
         }
 
         let stdout = String::from_utf8(output.stdout)?;
-        serde_json::from_str(&stdout)
-            .map_err(|source| {
-                HelmError::Serde {
-                    source,
-                    output: stdout.clone(),
-                    command: format!("{:?}", command).replace("\"", ""),
-                }
-            })
+        serde_json::from_str(&stdout).map_err(|source| HelmError::Serde {
+            source,
+            output: stdout.clone(),
+            command: format!("{:?}", command).replace("\"", ""),
+        })
     }
 
     /// get helm package version

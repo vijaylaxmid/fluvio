@@ -92,8 +92,7 @@ pub fn install_sys(opt: InstallOpt) -> Result<(), CliError> {
         _ => (),
     }
     let installer = builder.build()?;
-    installer._install_sys()
-        .map_err(ClusterError::InstallK8)?;
+    installer._install_sys().map_err(ClusterError::InstallK8)?;
     println!("fluvio sys chart has been installed");
     Ok(())
 }
