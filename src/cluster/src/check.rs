@@ -116,11 +116,7 @@ pub enum CheckError {
     ServiceDeleteError,
 
     /// Minikube tunnel not found, this error is used in case of macos we don't try to get tunnel up as it needs elevated context
-    #[error(
-        r#"Load balancer service not found. 
-  Please make sure you have minikube tunnel up and running.
-  Run `sudo nohup  minikube tunnel  > /tmp/tunnel.out 2> /tmp/tunnel.out &`"#
-    )]
+    #[error("Load balancer service not found, minikube tunnel may not be running")]
     MinikubeTunnelNotFound,
 
     /// Minikube tunnel not found, this error is used in case of linux where we can try to bring tunnel up
