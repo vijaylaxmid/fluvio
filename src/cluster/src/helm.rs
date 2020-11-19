@@ -7,8 +7,10 @@ use thiserror::Error;
 use serde::Deserialize;
 use flv_util::cmd::CommandExt;
 
+/// Errors that may occur while using Helm client
 #[derive(Error, Debug)]
 pub enum HelmError {
+    /// Helm is not installed or not in PATH
     #[error(
         r#"Unable to find 'helm' executable
   Please make sure helm is installed and in your PATH.
@@ -16,25 +18,34 @@ pub enum HelmError {
     )]
     HelmNotInstalled {
         #[from]
+        /// Underlying process error
         source: IoError,
     },
+    /// Failed to find the helm client version
     #[error("Failed to read helm client version: {0}")]
     HelmVersionNotFound(String),
+    /// Failed to connect to Kubernetes
     #[error("Failed to connect to Kubernetes")]
     FailedToConnect,
+    /// Helm output was not UTF-8
     #[error("Failed to parse helm output as UTF8")]
     Utf8Error {
         #[from]
+        /// The UTF-8 parse error
         source: FromUtf8Error,
     },
+    /// Helm output was not JSON
     #[error(
 "Failed to parse JSON from helm output.
 Command: '{command}'
 Output: '{output}'"
     )]
     Serde {
+        /// Underlying JSON error
         source: serde_json::Error,
+        /// The command that was run
         command: String,
+        /// The output that parsed incorrectly
         output: String,
     },
 }
