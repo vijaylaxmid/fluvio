@@ -58,12 +58,12 @@ impl CliError {
         use TheCheckError::*;
 
         match self {
-            e
+            _self
             @
             ClusterError(InstallK8(K8InstallError::PreCheck(HelmError(
                 TheHelmError::FailedToConnect,
             )))) => {
-                let report = Report::from(e);
+                let report = Report::from(_self);
                 #[cfg(target_os = "macos")]
                 let report =
                     report.suggestion("Make sure you have run 'minikube start --driver=hyperkit'");
@@ -72,16 +72,16 @@ impl CliError {
                     report.suggestion("Make sure you have run 'minikube start --driver=docker'");
                 report
             }
-            e
+            _self
             @
             ClusterError(InstallK8(K8InstallError::PreCheck(
                 TheCheckError::MinikubeTunnelNotFound,
             ))) => {
-                let report = Report::from(e);
+                let report = Report::from(_self);
                 let report = report.suggestion("Make sure minikube tunnel is running");
                 report.suggestion("Run 'minikube tunnel >/tmp/tunnel.out 2>/tmp/tunnel.out'")
             }
-            e => Report::from(e),
+            _self => Report::from(_self),
         }
     }
 }
